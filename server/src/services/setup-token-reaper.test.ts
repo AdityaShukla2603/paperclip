@@ -124,6 +124,29 @@ describe("setup-token reaper", () => {
     expect(store.rows.size).toBe(0);
   });
 
+  it("removes a malformed record with no lease ID without calling the lease manager", async () => {
+    const store = createMemoryStore();
+    store.seed({ sessionId: "missing-lease", leaseId: "", state: "failed" });
+    const leases = createFakeLeases();
+    const logs: string[] = [];
+    const reaper = createSetupTokenReaper({
+      store,
+      leases,
+      now: () => NOW,
+      log: (line) => logs.push(line),
+    });
+
+    const result = await reaper.sweep();
+
+    expect(result.released).toBe(0);
+    expect(result.failed).toBe(0);
+    expect(leases.releaseByIdCalls).toHaveLength(0);
+    expect(store.rows.has("missing-lease")).toBe(false);
+    expect(logs).toContain(
+      "[paperclip] Setup-token reaper: removed a cleanup record with no provider lease ID.",
+    );
+  });
+
   it("reaps every reapable record in one sweep and stays idempotent on the next", async () => {
     const store = createMemoryStore();
     store.seed({ sessionId: "orphan-a", leaseId: "lease-a", state: "failed" });

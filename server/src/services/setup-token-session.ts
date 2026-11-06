@@ -338,14 +338,29 @@ export async function reapSetupTokenLeases(
   let released = 0;
   let failed = 0;
   for (const record of records) {
+    const identity = {
+      sessionId: record.sessionId,
+      companyId: record.companyId,
+      ownerUserId: record.ownerUserId,
+      adapterType: record.adapterType,
+    };
+
+    // A missing provider lease ID is corrupt cleanup metadata, not a lease ID.
+    // Never pass it to the environment lease manager (which expects a UUID).
+    if (!record.leaseId) {
+      try {
+        await deps.store.remove(identity);
+        log("[paperclip] Setup-token reaper: removed a cleanup record with no provider lease ID.");
+      } catch {
+        failed += 1;
+        log("[paperclip] Setup-token reaper: removing a cleanup record with no provider lease ID failed; it stays retryable.");
+      }
+      continue;
+    }
+
     try {
       await deps.leases.releaseById(record.leaseId);
-      await deps.store.remove({
-        sessionId: record.sessionId,
-        companyId: record.companyId,
-        ownerUserId: record.ownerUserId,
-        adapterType: record.adapterType,
-      });
+      await deps.store.remove(identity);
       released += 1;
     } catch {
       failed += 1;
