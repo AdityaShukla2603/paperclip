@@ -2,8 +2,9 @@
 name: Paperclip Production Patch Build
 
 on:
-  workflow_dispatch:
-
+  push:
+    branches:
+      - fix/setup-token-empty-lease-id-clean
 permissions:
   contents: read
 
