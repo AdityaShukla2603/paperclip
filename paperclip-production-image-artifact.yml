@@ -1,0 +1,83 @@
+
+name: Paperclip Production Image Artifact
+
+on:
+  push:
+    branches:
+      - fix/setup-token-empty-lease-id-clean
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: paperclip-production-image-artifact
+  cancel-in-progress: false
+
+jobs:
+  build-production-image:
+    name: Build patched production image
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+
+    steps:
+      - name: Check out patch branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Apply fix to exact production release
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          git fetch https://github.com/paperclipai/paperclip.git \
+            refs/tags/v2026.1023.0:refs/tags/v2026.1023.0
+
+          git diff \
+            f68e696a5ac1070766552831e7460375248877fe^ \
+            f68e696a5ac1070766552831e7460375248877fe \
+            -- \
+            server/src/services/setup-token-session.ts \
+            server/src/services/setup-token-reaper.test.ts \
+            > /tmp/setup-token-fix.patch
+
+          test -s /tmp/setup-token-fix.patch
+          git checkout --detach v2026.1023.0
+          git apply --check /tmp/setup-token-fix.patch
+          git apply /tmp/setup-token-fix.patch
+          git diff --check
+
+      - name: Build final production image
+        run: |
+          set -euo pipefail
+          docker build \
+            --target production \
+            --build-arg PAPERCLIP_BUILD_VERSION=v2026.1023.0-setup-token-fix \
+            --build-arg PAPERCLIP_BUILD_COMMIT=v2026.1023.0-setup-token-fix \
+            --tag paperclip-setup-token-fix:2026.1023.0 .
+
+      - name: Verify production image
+        run: |
+          set -euo pipefail
+          docker image inspect paperclip-setup-token-fix:2026.1023.0 \
+            --format 'Image={{.Id}} Size={{.Size}}'
+          docker run --rm --entrypoint sh \
+            paperclip-setup-token-fix:2026.1023.0 \
+            -lc 'test -f /app/server/dist-runtime/index.mjs && test -x /usr/bin/tini && echo "Production image smoke check passed."'
+
+      - name: Export image archive
+        run: |
+          set -euo pipefail
+          docker save paperclip-setup-token-fix:2026.1023.0 | gzip -1 > paperclip-setup-token-fix-2026.1023.0.tar.gz
+          test -s paperclip-setup-token-fix-2026.1023.0.tar.gz
+          sha256sum paperclip-setup-token-fix-2026.1023.0.tar.gz
+          ls -lh paperclip-setup-token-fix-2026.1023.0.tar.gz
+
+      - name: Upload private workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: paperclip-production-image-2026.1023.0
+          path: paperclip-setup-token-fix-2026.1023.0.tar.gz
+          if-no-files-found: error
+          retention-days: 1
